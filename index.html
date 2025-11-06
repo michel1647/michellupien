@@ -1,1 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hazen‑Williams — Velocity & Friction Loss</title>
 
+  <style>
+    /* Minimal responsive style (no Bootstrap) */
+    :root{
+      --bg:#f6f7f9;
+      --card:#ffffff;
+      --muted:#6c757d;
+      --accent:#0d6efd;
+      --radius:10px;
+      --gap:12px;
+      --maxw:980px;
+    }
+
+    html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    .wrap{max-width:var(--maxw);margin:18px auto;padding:16px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:0 6px 18px rgba(0,0,0,0.06);padding:16px}
+    h1{font-size:1rem;margin:0 0 12px}
+    form{display:flex;flex-wrap:wrap;gap:var(--gap);align-items:end}
+    .field{display:flex;flex-direction:column;min-width:160px;flex:1}
+    label{font-size:.85rem;color:var(--muted);margin-bottom:6px}
+    input[type=number],select{padding:8px;border:1px solid #e0e0e0;border-radius:8px;font-size:1rem}
+    .btn{background:var(--accent);color:#fff;border:0;padding:9px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    .note{font-size:.86rem;color:var(--muted);margin-top:8px}
+
+    .table-wrap{margin-top:14px;overflow-x:auto;border-radius:8px}
+    table{width:100%;border-collapse:collapse;min-width:380px}
+    thead th{background:linear-gradient(#fff,#fbfbfb);position:sticky;top:0;padding:10px 12px;text-align:left;font-weight:700;border-bottom:1px solid #eee}
+    td{padding:10px 12px;text-align:right;border-bottom:1px solid #f1f1f1}
+    td.nps{text-align:left;font-weight:600}
+
+    /* Responsive small screens */
+    @media (max-width:640px){
+      form{flex-direction:column;align-items:stretch}
+      .field{min-width:auto}
+      .btn{width:100%}
+      thead th, td{padding:12px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" role="application" aria-labelledby="title">
+      <h1 id="title">Hazen‑Williams (NFPA 13) — Vitesse & Perte de charge (psi/ft)</h1>
+
+      <form id="inputForm" novalidate>
+        <div class="field">
+          <label for="qInput">Flow Q (gpm)</label>
+          <input id="qInput" name="q" type="number" min="1" max="10000" step="1" value="100" inputmode="numeric" required>
+        </div>
+
+        <div class="field">
+          <label for="cInput">C factor</label>
+          <input id="cInput" name="c" type="number" min="50" max="200" step="1" value="120" inputmode="numeric" required>
+        </div>
+
+        <div class="field">
+          <label for="schSelect">Schedule</label>
+          <select id="schSelect" name="schedule" aria-label="Pipe schedule">
+            <option value="sch10_in">SCH 10</option>
+            <option value="sch40_in" selected>SCH 40</option>
+            <option value="sch80_in">SCH 80</option>
+          </select>
+        </div>
+
+        <div style="align-self:stretch;display:flex;align-items:flex-end">
+          <button class="btn" type="submit">Calculer</button>
+        </div>
+
+        <div style="flex-basis:100%" class="note">
+          Flow: 1–10000 gpm · C: 50–200 · Mise à jour automatique (debounced). Affiche les tailles où vitesse &lt; 50 ft/s ET perte &gt; 0.001 psi/ft.
+        </div>
+      </form>
+
+      <div class="table-wrap" aria-live="polite">
+        <table id="results" role="table" aria-label="Résultats">
+          <thead>
+            <tr>
+              <th scope="col">NPS</th>
+              <th scope="col" style="text-align:right">Vitesse (ft/s)</th>
+              <th scope="col" style="text-align:right">Perte (psi/ft)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    const pipeTable = [
+      { nps: "1/8", od_in: 0.405, sch10_in: 0.049, sch40_in: 0.068, sch80_in: 0.095 },
+      { nps: "1/4", od_in: 0.540, sch10_in: 0.065, sch40_in: 0.088, sch80_in: 0.119 },
+      { nps: "3/8", od_in: 0.675, sch10_in: 0.065, sch40_in: 0.091, sch80_in: 0.126 },
+      { nps: "1/2", od_in: 0.840, sch10_in: 0.083, sch40_in: 0.109, sch80_in: 0.147 },
+      { nps: "3/4", od_in: 1.050, sch10_in: 0.095, sch40_in: 0.113, sch80_in: 0.154 },
+      { nps: "1", od_in: 1.315, sch10_in: 0.109, sch40_in: 0.133, sch80_in: 0.179 },
+      { nps: "1-1/4", od_in: 1.660, sch10_in: 0.126, sch40_in: 0.140, sch80_in: 0.191 },
+      { nps: "1-1/2", od_in: 1.900, sch10_in: 0.145, sch40_in: 0.145, sch80_in: 0.200 },
+      { nps: "2", od_in: 2.375, sch10_in: 0.154, sch40_in: 0.154, sch80_in: 0.218 },
+      { nps: "2-1/2", od_in: 2.875, sch10_in: 0.203, sch40_in: 0.203, sch80_in: 0.276 },
+      { nps: "3", od_in: 3.500, sch10_in: 0.216, sch40_in: 0.216, sch80_in: 0.300 },
+      { nps: "3-1/2", od_in: 4.000, sch10_in: 0.226, sch40_in: 0.226, sch80_in: 0.318 },
+      { nps: "4", od_in: 4.500, sch10_in: 0.237, sch40_in: 0.237, sch80_in: 0.337 },
+      { nps: "5", od_in: 5.563, sch10_in: 0.276, sch40_in: 0.258, sch80_in: 0.375 },
+      { nps: "6", od_in: 6.625, sch10_in: 0.280, sch40_in: 0.280, sch80_in: 0.432 },
+      { nps: "8", od_in: 8.625, sch10_in: 0.322, sch40_in: 0.322, sch80_in: 0.500 },
+      { nps: "10", od_in: 10.750, sch10_in: 0.365, sch40_in: 0.365, sch80_in: 0.594 },
+      { nps: "12", od_in: 12.750, sch10_in: 0.406, sch40_in: 0.406, sch80_in: 0.688 },
+      { nps: "14", od_in: 14.000, sch10_in: 0.437, sch40_in: 0.437, sch80_in: 0.750 },
+      { nps: "16", od_in: 16.000, sch10_in: 0.500, sch40_in: 0.500, sch80_in: 0.813 },
+      { nps: "18", od_in: 18.000, sch10_in: 0.562, sch40_in: 0.562, sch80_in: 0.906 },
+      { nps: "20", od_in: 20.000, sch10_in: 0.593, sch40_in: 0.593, sch80_in: 1.000 },
+      { nps: "24", od_in: 24.000, sch10_in: 0.687, sch40_in: 0.687, sch80_in: 1.125 }
+    ];
+
+    const GPM_TO_CFS = 1 / 448.831;
+    const FT_TO_PSI = 0.433512;
+
+    function HazenWilliams(Q_gpm, C, id_in){
+      if (Q_gpm <= 0 || C <= 0 || id_in <= 0) return NaN;
+      const hf = 4.52 * Math.pow(Q_gpm, 1.85) / (Math.pow(C, 1.85) * Math.pow(id_in, 4.87));
+      return hf;
+    }
+
+    function Fluid_Velocity(Q_gpm, id_in){
+      if (Q_gpm <= 0 || id_in <= 0) return NaN;
+      const Q_cfs = Q_gpm * GPM_TO_CFS;
+      const id_ft = id_in / 12;
+      const area = Math.PI * id_ft * id_ft / 4;
+      return Q_cfs / area;
+    }
+
+    function fmt(v, d=3){ return isFinite(v) ? Number(v.toFixed(d)) : "-" }
+
+    function renderResults(){
+      const q = Number(qInput.value) || 0;
+      const c = Number(cInput.value) || 0;
+      const schKey = schSelect.value;
+      const tbody = document.querySelector('#results tbody');
+      tbody.innerHTML = '';
+
+      if (q < 1 || q > 10000) return;
+      if (c < 50 || c > 200) return;
+
+      const MAX_VEL = 50;      // ft/s
+      const MIN_PSI_FT = 0.001; // psi/ft
+
+      for (const p of pipeTable){
+        const wall = p[schKey];
+        const id_in = +(p.od_in - 2*wall).toFixed(6);
+        const vel = Fluid_Velocity(q, id_in);
+        const psiPerFt = HazenWilliams(q, c, id_in);
+
+        if (!(vel < MAX_VEL && psiPerFt > MIN_PSI_FT)) continue;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="nps">${p.nps}</td><td class="text-end">${fmt(vel,1)}</td><td class="text-end">${fmt(psiPerFt,3)}</td>`;
+        tbody.appendChild(tr);
+      }
+
+      if (!tbody.children.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="nps text-center" colspan="3" style="color:#6c757d">No sizes match: velocity &lt; ${MAX_VEL} ft/s and friction &gt; ${MIN_PSI_FT} psi/ft</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function debounce(fn, ms=150){ let t; return (...a)=>{ clearTimeout(t); t = setTimeout(()=>fn(...a), ms); }; }
+
+    const qInput = document.getElementById('qInput');
+    const cInput = document.getElementById('cInput');
+    const schSelect = document.getElementById('schSelect');
+    const debouncedRender = debounce(renderResults, 150);
+
+    qInput.addEventListener('input', debouncedRender);
+    cInput.addEventListener('input', debouncedRender);
+    schSelect.addEventListener('change', renderResults);
+
+    document.getElementById('inputForm').addEventListener('submit', function(e){ e.preventDefault(); renderResults(); });
+
+    renderResults();
+  </script>
+</body>
+</html>
